@@ -1,0 +1,327 @@
+<html>
+	<head>
+		<link href="http://ajax.googleapis.com/ajax/libs/jqueryui/1.8/themes/base/jquery-ui.css" rel="stylesheet" type="text/css"/>
+		<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js"></script>
+		<script src="http://ajax.googleapis.com/ajax/libs/jqueryui/1.8/jquery-ui.min.js"></script>
+
+		<script>
+			var girlHorizontalVelocity = -200;
+			var vomitHorizontalVelocity = -200; // px per second
+			var vomitVerticalVelocity = 200; // px per second
+			var vomitVerticalAcceleration = 0; // px per second^2
+			var bucketHorizontalVelocity = 200; // px per second
+			var lastTime;
+			var vomits = [ ];
+			var shortestDirectionChangeTime = 2; // seconds
+			var longestDirectionChangeTime = 10; // seconds
+			var nextGirlChangeDirectionTime;
+			var nextGirlVomitTime;
+			var shortestVomitTime = 0.75; // seconds
+			var longestVomitTime = 3; // seconds
+			var bucketMisses = 0;
+			var px;
+
+			$(function() {
+				$('#bucket').draggable({ axis: 'x' });
+			});
+
+			$(function playGame() {
+				var girl = $('#girl');
+				var bucket = $('#bucket');
+				var game = $('#game');
+
+				function cssToNumber(node, property) {
+					var px = $(node).css(property);
+					var v = px.replace(/px$/, '');
+					return Number(v);
+				}
+
+				function left(sprite) {
+					return cssToNumber(sprite, 'left');
+				}
+
+				function top(sprite) {
+					return cssToNumber(sprite, 'top');
+				}
+
+				function spritePos(sprite, newPos) {
+					if (newPos !== undefined) {
+						sprite.css('left', newPos.left);
+						sprite.css('top',  newPos.top);
+					}
+
+					return {
+						left: left(sprite),
+						top:  top(sprite)
+					};
+				}
+
+				function vomitStart() {
+					return {
+						left: left(girl) + 30,
+						top:  top(girl) + 100
+					};
+				}
+
+				function changeGirlDirection() {
+					girlHorizontalVelocity = -girlHorizontalVelocity;
+				}
+
+				function shouldGirlChangeDirection() {
+					return (new Date() > nextGirlChangeDirectionTime);
+				}
+
+				function computeRandomTime(min, max) {
+					var r = Math.random();
+					var maxTime = max - min;
+					var elapsed = r*maxTime;
+					var time = min + elapsed * 1000;
+					return +(new Date()) + time;
+				}
+
+				function computeNextGirlChangeDirectionTime() {
+					nextGirlChangeDirectionTime =
+						computeRandomTime(shortestDirectionChangeTime, longestDirectionChangeTime);
+				}
+
+				function computeNextGirlVomitTime() {
+					nextGirlVomitTime =
+						computeRandomTime(shortestVomitTime, longestVomitTime);
+				}
+
+				function shouldGirlVomit() {
+					return (new Date() > nextGirlVomitTime);
+				}
+
+				function moveGirl() {
+					var pos = spritePos(girl);
+					pos.left += girlHorizontalVelocity / 30;
+					if (pos.left < 0) {
+						changeGirlDirection();
+					} else if (pos.left + girl.width() > $(window).width()) {
+						changeGirlDirection();
+					}
+					spritePos(girl, pos);
+
+					if (shouldGirlChangeDirection()) {
+						changeGirlDirection();
+						computeNextGirlChangeDirectionTime();
+					}
+				}
+
+				function gameOver() {
+					var go = $('<div class=gameOver>Game over!</div>');
+					$('#game').append(go);
+					bucket.draggable("option", "disabled", true);
+					$(window).unbind('mousemove', onmousemove);
+					$('.gameOver').dialog( {
+						buttons: {
+							"Play again": function() {
+								$(this).dialog('close');
+								$('.gameOver').remove();
+								bucket.css('left', px - 60);
+//								bucket.draggable("option", "disabled", false);
+								playGame();
+							}
+						}
+					} );
+				}
+
+				function moveVomit(i) {
+					var vomit = vomits[i];
+					var elapsedMs = new Date() - lastTime;
+					var vomitPos = spritePos(vomit);
+					vomit.css('left', vomitPos.left + vomit.horizontalVelocity*(elapsedMs/1000));
+					vomit.css('top',  vomitPos.top  + vomitVerticalVelocity*(elapsedMs/1000) + vomit.verticalAcceleration);
+
+					vomit.verticalAcceleration += vomitVerticalAcceleration/30;
+
+					var bottomOfVomit = top(vomit) + vomit.height();
+					var bottomOfBucket = top(bucket) + bucket.height();
+					var topOfBucket = top(bucket) + 45; // 45 is distance from top of bucket image to its opening
+
+					if (left(vomit) < 0) { // did it pass the edge of the screen?
+						vomit.horizontalVelocity = -vomit.horizontalVelocity;
+						if (vomit.horizontalVelocity < 0) {
+							rotation = 30;
+						} else {
+							rotation = -30;
+						}
+						vomit.css('-webkit-transform', 'rotate(' + rotation + 'deg)');
+					}
+
+					if (bottomOfVomit >= topOfBucket) { // did it land in the bucket?
+						if (!vomit.passedBucket) {
+							var leftOfBucket = left(bucket) + 25;
+							var rightOfBucket = leftOfBucket + bucket.width() - 45;
+							// If this vomit hit the bucket, yay! Delete it.
+							if (left(vomit)+vomit.width() > leftOfBucket && left(vomit) < rightOfBucket) {
+								vomit.remove();
+								vomits.splice(i, 1);
+
+								var splash = $('<img class=splash src=splash.png>');
+								game.append(splash);
+								splash.css('left', left(vomit) - 20);
+								splash.css('top', top(vomit) - 8);
+
+								setTimeout(function() { splash.remove() }, 300);
+
+								var bucketHits = $('#bucketHits');
+								var count = Number(bucketHits.text());
+								++count;
+								bucketHits.text(count);
+							} else {
+								vomit.passedBucket = true;
+							}
+						}
+					}
+
+					if (bottomOfVomit >= bottomOfBucket) { // did it hit the ground?
+						vomit.remove();
+						vomits.splice(i, 1);
+
+						var splat = $('<img class=splat src=splat.png>');
+						game.append(splat);
+						splat.css('left', vomit.css('left'));
+						splat.css('top', vomit.css('top'));
+
+						setTimeout(function() { splat.remove() }, 300);
+
+						var $bucketMisses = $('#bucketMisses');
+						++bucketMisses;
+						$bucketMisses.text(bucketMisses);
+
+						if (bucketMisses == 5) {
+							gameOver();
+						}
+					}
+				}
+
+				function moveVomits() {
+					for (var i=vomits.length-1; i>=0; --i) {
+						moveVomit(i);
+					}
+				}
+
+				function vomit() {
+					var vomitPos = vomitStart();
+					var vomit = $('<img class=vomit src=vomit.png>');
+					game.append(vomit);
+					vomit.css('left', vomitPos.left);
+					vomit.css('top', vomitPos.top);
+					vomit.passedBucket = false;
+					vomit.verticalAcceleration = 0;
+					vomit.horizontalVelocity = vomitHorizontalVelocity;
+					vomits.push(vomit);
+
+					var startTime = new Date();
+					var va = vomitVerticalAcceleration;
+				}
+
+				function maybeVomit() {
+					if (shouldGirlVomit()) {
+						vomit();
+						computeNextGirlVomitTime();
+					}
+				}
+
+				function timerTick() {
+					moveGirl();
+					moveVomits();
+					maybeVomit();
+
+					if (bucketMisses < 5) {
+						setTimeout(timerTick, 1000/30);
+						lastTime = new Date();
+					}
+				}
+
+				function onmousemove(e) {
+					if (px !== undefined) {
+						var delta = e.pageX - px;
+						bucket.css('left', left(bucket) + delta);
+					}
+					px = e.pageX;
+				}
+
+				for (var i=0; i<vomits.length; ++i) {
+					vomits[i].remove();
+				}
+				vomits = [ ];
+
+				nextGirlChangeDirectionTime = undefined;
+				nextGirlVomitTime = undefined;
+				bucketMisses = 0;
+				$('#bucketMisses').text(0);
+				$('#bucketHits').text(0);
+
+				lastTime = new Date();
+
+				girl.css('left', 500).css('top', 0);
+
+				computeNextGirlChangeDirectionTime();
+				computeNextGirlVomitTime();
+				setTimeout(timerTick, 1000/30); // 30 frames per second
+
+				$(window).bind('mousemove', onmousemove);
+			});
+		</script>
+
+		<style>
+			#game img {
+				position: absolute;
+			}
+			#girl {
+				width: 200px;
+			}
+			#bucket {
+				/* width: 75px; (bucket image I have at home) */
+				width: 120px; /* bucket image I have at work */
+				top: 400px;
+			}
+			.splat {
+				width: 75px;
+				top: 400px;
+				/* visibility: hidden; */
+			}
+			.splash {
+				width: 60px;
+			}
+			.vomit {
+				left: 300px;
+				width: 20px;
+				-webkit-transform: rotate(30deg);
+			}
+			#scoreboard {
+				visibility: hidde;
+				border: 1px solid black;
+			}
+			.scoreboard-image {
+				width: 40px;
+			}
+			.score {
+				font: 16pt sans-serif;
+			}
+		</style>
+
+	</head>
+	<body>
+
+		<table id="scoreboard" align=right>
+			<tr>
+				<td><img class="scoreboard-image" src="bucket.jpg"></td>
+				<td id="bucketHits" class=score>0</td>
+			</tr>
+			<tr>
+				<td><img class="scoreboard-image" src="splat.png"></td>
+				<td id="bucketMisses" class=score>0</td>
+			</tr>
+		</table>
+
+		<div id="game">
+			<img id="girl" src="girl.jpg">
+			<img id="bucket" src="bucket.jpg">
+		</div>
+
+	</body>
+</html>
